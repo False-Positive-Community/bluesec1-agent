@@ -1,0 +1,50 @@
+[project]
+name = "bluesec1-agent"
+version = "0.1.0"
+description = "Reference SOC investigation agent and runtime client for the BlueSec1 competition"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "googleapis-common-protos>=1.75,<2",
+    "grpcio>=1.83,<2",
+    "grpcio-status>=1.83,<2",
+    "loguru>=0.7,<1",
+    "openai>=2.26,<3",
+    "protobuf>=7.35.1,<8",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.12,<3",
+    "truststore>=0.10,<1",
+]
+
+[project.scripts]
+bluesec1-agent = "bluesec1_agent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bluesec1_client", "src/bluesec1_agent"]
+
+[dependency-groups]
+dev = [
+    "grpcio-tools>=1.83,<2",
+    "pytest>=8,<10",
+    "ruff>=0.9,<1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["src/bluesec1_client/proto/"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["bluesec1_agent", "bluesec1_client"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,183 @@
+syntax = "proto3";
+
+package investigation.runtime.v1;
+
+import "google/protobuf/struct.proto";
+
+service ScenarioRuntime {
+  rpc CreateRun(CreateRunRequest) returns (Run);
+  rpc LeaseTask(LeaseTaskRequest) returns (LeaseTaskResponse);
+  rpc CallTool(CallToolRequest) returns (ToolCallResponse);
+  rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
+  rpc CloseRun(CloseRunRequest) returns (CloseRunResponse);
+}
+
+// Stable names used as google.rpc.ErrorInfo.reason values.
+enum RuntimeErrorReason {
+  RUNTIME_ERROR_REASON_UNSPECIFIED = 0;
+  RUN_NOT_FOUND = 1;
+  TASK_NOT_FOUND = 2;
+  IDEMPOTENCY_CONFLICT = 3;
+  SUBJECT_ACTIVE_TASK_LIMIT_REACHED = 4;
+  RUN_ACTIVE_TASK_LIMIT_REACHED = 5;
+  PROCESS_ACTIVE_TASK_LIMIT_REACHED = 6;
+  RATE_LIMITED = 7;
+  RUNTIME_SESSION_LOST = 8;
+  RUN_CLOSED = 9;
+  TASK_ALREADY_FINISHED = 10;
+  INVALID_DYNAMIC_VALUE = 11;
+  INCOMPATIBLE_PROTOCOL = 12;
+  RUNTIME_UNAVAILABLE = 13;
+  INTERNAL_RUNTIME_ERROR = 14;
+  SUBJECT_ACTIVE_RUN_LIMIT_REACHED = 15;
+  PROCESS_ACTIVE_RUN_LIMIT_REACHED = 16;
+  PROCESS_IN_FLIGHT_OPERATION_LIMIT_REACHED = 17;
+  SUBJECT_IN_FLIGHT_OPERATION_LIMIT_REACHED = 18;
+  PROCESS_IDEMPOTENCY_ENTRY_LIMIT_REACHED = 19;
+  SUBJECT_IDEMPOTENCY_ENTRY_LIMIT_REACHED = 20;
+  PROCESS_CLOSE_IN_FLIGHT_OPERATION_LIMIT_REACHED = 21;
+  SUBJECT_CLOSE_IN_FLIGHT_OPERATION_LIMIT_REACHED = 22;
+  PROCESS_CLOSE_IDEMPOTENCY_ENTRY_LIMIT_REACHED = 23;
+  SUBJECT_CLOSE_IDEMPOTENCY_ENTRY_LIMIT_REACHED = 24;
+  COMPETITION_ARENA_CLOSED = 25;
+  SUBJECT_RUN_START_RATE_LIMIT_REACHED = 26;
+}
+
+enum RunState {
+  RUN_STATE_UNSPECIFIED = 0;
+  RUN_STATE_ACTIVE = 1;
+  RUN_STATE_CLOSING = 2;
+  RUN_STATE_CLOSED = 3;
+}
+
+enum CloseRunReason {
+  CLOSE_RUN_REASON_UNSPECIFIED = 0;
+  CLOSE_RUN_REASON_CLIENT_REQUESTED = 1;
+  CLOSE_RUN_REASON_CLIENT_ERROR = 2;
+  CLOSE_RUN_REASON_CLIENT_INTERRUPTED = 3;
+}
+
+enum CompletionReason {
+  COMPLETION_REASON_UNSPECIFIED = 0;
+  COMPLETION_REASON_TERMINATED = 1;
+  COMPLETION_REASON_TRUNCATED = 2;
+  COMPLETION_REASON_ERROR = 3;
+  COMPLETION_REASON_ABORTED = 4;
+}
+
+message DynamicValue {
+  oneof kind {
+    google.protobuf.NullValue null_value = 1;
+    bool bool_value = 2;
+    sint64 integer_value = 3;
+    double float_value = 4;
+    string string_value = 5;
+    DynamicObject object_value = 6;
+    DynamicList list_value = 7;
+  }
+}
+
+message DynamicObject {
+  map<string, DynamicValue> fields = 1;
+}
+
+message DynamicList {
+  repeated DynamicValue values = 1;
+}
+
+message CreateRunRequest {
+  string idempotency_key = 1;
+  optional string label = 2;
+  optional string agent_name = 3;
+  optional string model_name = 4;
+  DynamicObject metadata = 5;
+  // Which arena to run in. Omit it to use whichever one is open.
+  optional string arena = 6;
+}
+
+message Run {
+  string run_id = 1;
+  RunState state = 2;
+}
+
+message LeaseTaskRequest {
+  string run_id = 1;
+  string idempotency_key = 2;
+}
+
+message PublicTask {
+  string task_id = 1;
+  DynamicObject observation = 2;
+}
+
+message LeasedTask {
+  string run_id = 1;
+  PublicTask task = 2;
+}
+
+message QueueExhausted {
+  string run_id = 1;
+}
+
+message LeaseTaskResponse {
+  oneof outcome {
+    LeasedTask leased = 1;
+    QueueExhausted exhausted = 2;
+  }
+}
+
+message CallToolRequest {
+  string run_id = 1;
+  string task_id = 2;
+  string call_id = 3;
+  string tool_name = 4;
+  DynamicObject arguments = 5;
+}
+
+message ToolCallResponse {
+  string run_id = 1;
+  string task_id = 2;
+  string call_id = 3;
+  string tool_name = 4;
+  DynamicObject observation = 5;
+  double reward = 6;
+  bool terminated = 7;
+  bool truncated = 8;
+  DynamicObject info = 9;
+  optional TaskResult task_result = 10;
+}
+
+message TaskResult {
+  string task_id = 1;
+  CompletionReason completion_reason = 2;
+  double total_reward = 3;
+  uint32 steps_taken = 4;
+  uint32 tool_calls = 5;
+  double quality_score = 6;
+  double efficiency_score = 7;
+  double wall_time_seconds = 8;
+}
+
+message AbortTaskRequest {
+  string run_id = 1;
+  string task_id = 2;
+  string idempotency_key = 3;
+  optional string error_message = 4;
+}
+
+message AbortTaskResponse {
+  string run_id = 1;
+  TaskResult task_result = 2;
+}
+
+message CloseRunRequest {
+  string run_id = 1;
+  string idempotency_key = 2;
+  CloseRunReason reason = 3;
+  optional string error_message = 4;
+}
+
+message CloseRunResponse {
+  string run_id = 1;
+  RunState state = 2;
+}
