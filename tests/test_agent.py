@@ -8,6 +8,7 @@ from bluesec1_agent.models import (
     FinishInvestigationArtifact,
     FinishInvestigationRequest,
     GetEntityRequest,
+    MaliciousFinishInvestigationSubmission,
     NextStep,
 )
 from bluesec1_client import (
@@ -156,6 +157,7 @@ def test_agent_executes_fresh_structured_task_via_remote_session() -> None:
                 function=GetEntityRequest(
                     tool="get_entity",
                     entity_id="entity-1",
+                    reasoning="Inspect the alert entity.",
                 ),
             ),
             NextStep(
@@ -164,14 +166,16 @@ def test_agent_executes_fresh_structured_task_via_remote_session() -> None:
                 task_completed=True,
                 function=FinishInvestigationRequest(
                     tool="finish_investigation",
-                    verdict="malicious",
-                    ir_artifacts=[
-                        FinishInvestigationArtifact(
-                            entity_id="host-1",
-                            kind="host_to_isolate",
-                        )
-                    ],
-                    reasoning="The alert process is part of a suspicious process chain.",
+                    submission=MaliciousFinishInvestigationSubmission(
+                        verdict="malicious",
+                        ir_artifacts=[
+                            FinishInvestigationArtifact(
+                                entity_id="host-1",
+                                kind="host_to_isolate",
+                            )
+                        ],
+                        reasoning="The alert process is part of a suspicious process chain.",
+                    ),
                 ),
             ),
         ]
@@ -188,6 +192,17 @@ def test_agent_executes_fresh_structured_task_via_remote_session() -> None:
         "get_entity",
         "finish_investigation",
     ]
+    assert session.calls[0][1] == {
+        "entity_id": "entity-1",
+        "reasoning": "Inspect the alert entity.",
+    }
+    assert session.calls[1][1] == {
+        "submission": {
+            "verdict": "malicious",
+            "ir_artifacts": [{"entity_id": "host-1", "kind": "host_to_isolate"}],
+            "reasoning": "The alert process is part of a suspicious process chain.",
+        }
+    }
     assert any(
         message.get("role") == "tool" and "process-1" in str(message.get("content"))
         for message in llm.requests[1]
