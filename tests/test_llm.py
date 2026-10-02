@@ -11,8 +11,13 @@ from bluesec1_agent.llm import (
 )
 from bluesec1_agent.models import (
     NEXT_STEP_RESPONSE_FORMAT,
+    BenignFinishInvestigationSubmission,
+    FinishInvestigationEntityEvidence,
+    FinishInvestigationRequest,
+    GetADObjectInfoRequest,
     GetEntityRequest,
     NextStep,
+    SearchRequest,
 )
 
 
@@ -58,6 +63,7 @@ def valid_process_step() -> NextStep:
         function=GetEntityRequest(
             tool="get_entity",
             entity_id="entity-1",
+            reasoning="Inspect the alert entity.",
         ),
     )
 
@@ -104,3 +110,118 @@ def test_response_schema_requires_nullable_tool_fields() -> None:
     assert set(process_schema["required"]) == set(process_schema["properties"])
     assert "default" not in str(schema)
     assert "discriminator" not in str(schema)
+    assert "oneOf" not in str(schema)
+    assert set(schema["$defs"]["SearchRequest"]["required"]) == set(
+        schema["$defs"]["SearchRequest"]["properties"]
+    )
+    assert set(schema["$defs"]["FinishInvestigationRequest"]["properties"]) == {
+        "tool",
+        "submission",
+    }
+
+
+def test_competition_search_serializes_extended_arguments() -> None:
+    """Search should retain every argument supported by the competition tool."""
+    request = SearchRequest.model_validate(
+        {
+            "tool": "search",
+            "query": "powershell",
+            "reasoning": "Find the related process.",
+            "page_id": 2,
+            "scope": {"kind": "entity", "type": "windows_process"},
+            "time_window": {"from": "2026-09-01", "to": "2026-09-02"},
+            "sort_order": "descending",
+        }
+    )
+
+    arguments = request.model_dump(mode="json", by_alias=True, exclude={"tool"}, exclude_none=True)
+
+    assert arguments["page_id"] == 2
+    assert arguments["scope"] == {"kind": "entity", "type": "windows_process"}
+    assert arguments["time_window"] == {
+        "from": "2026-09-01T00:00:00Z",
+        "to": "2026-09-02T23:59:59.999999Z",
+    }
+    assert arguments["sort_order"] == "descending"
+    with pytest.raises(ValueError):
+        SearchRequest.model_validate(
+            {"tool": "search", "query": "process", "reasoning": "Inspect.", "page_id": 0}
+        )
+    with pytest.raises(ValueError):
+        SearchRequest.model_validate(
+            {
+                "tool": "search",
+                "query": "process",
+                "reasoning": "Inspect.",
+                "scope": {"kind": "entity", "type": "nonexistent"},
+            }
+        )
+    with pytest.raises(ValueError):
+        SearchRequest.model_validate(
+            {
+                "tool": "search",
+                "query": "process",
+                "reasoning": "Inspect.",
+                "time_window": {"from": "2026-09-02", "to": "2026-09-01"},
+            }
+        )
+
+
+def test_navigation_requires_reasoning_and_supports_ad_lookup() -> None:
+    """Competition navigation tools should require a bounded rationale."""
+    with pytest.raises(ValueError):
+        GetEntityRequest.model_validate({"tool": "get_entity", "entity_id": "entity-1"})
+    with pytest.raises(ValueError):
+        GetADObjectInfoRequest.model_validate(
+            {"tool": "get_ad_object_info", "ad_object_id": "ad-1", "reasoning": "x" * 4097}
+        )
+
+    request = GetADObjectInfoRequest(
+        tool="get_ad_object_info", ad_object_id="ad-1", reasoning="Inspect the account."
+    )
+    assert request.model_dump(exclude={"tool"}) == {
+        "ad_object_id": "ad-1",
+        "reasoning": "Inspect the account.",
+    }
+
+
+def test_benign_finish_uses_submission_envelope() -> None:
+    """Benign conclusions should contain only legitimacy evidence."""
+    request = FinishInvestigationRequest(
+        tool="finish_investigation",
+        submission=BenignFinishInvestigationSubmission(
+            verdict="benign",
+            legitimacy_evidence=[
+                FinishInvestigationEntityEvidence(
+                    anchor="entity", entity_id="entity-1", property_fields=["command_line"]
+                )
+            ],
+            reasoning="The process matches authorized activity.",
+        ),
+    )
+
+    assert request.model_dump(exclude={"tool"}) == {
+        "submission": {
+            "verdict": "benign",
+            "legitimacy_evidence": [
+                {"anchor": "entity", "entity_id": "entity-1", "property_fields": ["command_line"]}
+            ],
+            "reasoning": "The process matches authorized activity.",
+        }
+    }
+    step = NextStep(
+        current_state="The alert is explained by authorized activity.",
+        plan_remaining_steps_brief=["Submit benign evidence."],
+        task_completed=True,
+        function=request,
+    )
+    assert isinstance(
+        parse_next_step_payload(step.model_dump_json()).function, FinishInvestigationRequest
+    )
+    with pytest.raises(ValueError):
+        FinishInvestigationRequest.model_validate(
+            {
+                "tool": "finish_investigation",
+                "submission": {"verdict": "benign", "ir_artifacts": [], "reasoning": "Safe."},
+            }
+        )
